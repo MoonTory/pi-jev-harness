@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process'
 
 import { ask, choiceOf, noulOf, relevanceQuestions, routingQuestions, THRESHOLDS } from './jev.ts'
-import { termsIn } from './route.ts'
+import { namedIn, termsIn } from './route.ts'
 
 const prompt =
 	process.argv.slice(2).join(' ') || 'where is the tick loop and how does the veto work?'
@@ -62,6 +62,8 @@ const list = [...files.entries()].slice(0, 40).map(([path, matched]) => ({ path,
 console.log(`terms: ${terms.join(', ') || '(none)'} → ${list.length} candidate files`)
 
 if (list.length) {
+	const named = namedIn(prompt, list).map((f) => f.path)
+	if (named.length) console.log(`pinned (named in prompt): ${named.join(', ')}`)
 	const rel = await ask({ task: prompt, files: list }, relevanceQuestions(list.map((f) => f.path)))
 	const first = choiceOf(rel.answers, 'first')
 	console.log(
