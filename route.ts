@@ -327,6 +327,7 @@ export async function onBeforeAgentStart(
 		}
 	)
 	const notes = [routed?.note, fetched?.note].filter((note): note is string => !!note)
+	if (fetched?.message && ctx.hasUI) ctx.ui.notify(`jev ${fetched.note}`, 'info')
 	h.status(ctx, notes[0] ? `jev ${notes.join('; ')}` : `jev-harness ${h.config.mode}`)
 	if (h.config.mode !== 'on') return undefined
 	const systemPrompt = routed
