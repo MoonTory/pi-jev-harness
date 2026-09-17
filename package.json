@@ -1,0 +1,39 @@
+{
+	"name": "pi-jev-harness",
+	"version": "0.1.0",
+	"description": "Pi extension: TypeSafe's Jev does the reasoning around tool calls (routing, context pre-fetch, result trimming, loop control, guard) so the main model spends its tokens on generation only.",
+	"keywords": [
+		"pi-package",
+		"typesafe",
+		"jev",
+		"harness",
+		"routing"
+	],
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=22.18"
+	},
+	"scripts": {
+		"lint": "oxlint --type-aware",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"typecheck": "tsc --noEmit",
+		"check": "npm run typecheck && npm run lint && npm run format:check"
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "0.84.4",
+		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
+		"@oxlint/plugins": "1.78.0",
+		"@types/node": "^24.0.0",
+		"oxlint": "1.78.0",
+		"oxlint-tsgolint": "7.0.2001",
+		"prettier": "3.9.6",
+		"typescript": "^5.9.0"
+	}
+}

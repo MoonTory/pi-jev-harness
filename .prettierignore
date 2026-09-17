@@ -1,0 +1,2 @@
+lint/oxlint-rules/src/vendor/**
+package-lock.json

@@ -1,0 +1,65 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"jsPlugins": ["./lint/oxlint-rules/src/index.ts"],
+	"categories": {
+		"correctness": "error",
+		"suspicious": "error"
+	},
+	"rules": {
+		"no-underscore-dangle": "off",
+		"unicorn/consistent-function-scoping": "off",
+		"unicorn/no-array-sort": "off",
+		"no-shadow": "error",
+		"typescript/no-explicit-any": "error",
+		"typescript/triple-slash-reference": [
+			"error",
+			{ "lib": "never", "path": "never", "types": "never" }
+		],
+		"typescript/consistent-type-imports": "error",
+		"typescript/no-floating-promises": "error",
+		"typescript/no-misused-promises": "error",
+		"typescript/await-thenable": "error",
+		"typescript/consistent-return": "off",
+		"typescript/no-base-to-string": "off",
+		"typescript/no-duplicate-type-constituents": "off",
+		"typescript/no-misused-spread": "off",
+		"typescript/no-redundant-type-constituents": "off",
+		"typescript/no-unnecessary-boolean-literal-compare": "off",
+		"typescript/no-unnecessary-template-expression": "off",
+		"typescript/no-unnecessary-type-arguments": "off",
+		"typescript/no-unnecessary-type-assertion": "off",
+		"typescript/no-unnecessary-type-conversion": "off",
+		"typescript/no-unnecessary-type-parameters": "off",
+		"typescript/no-unsafe-type-assertion": "off",
+		"typescript/require-array-sort-compare": "off",
+		"typescript/restrict-template-expressions": "off",
+		"typescript/unbound-method": "off",
+		"no-nested-ternary": "error",
+		"no-console": "error",
+		"max-lines": ["warn", 400],
+		"max-lines-per-function": ["warn", 60],
+		"eqeqeq": ["error", "always", { "null": "ignore" }],
+		"oxlint-rules/no-bare-error-constructor": "off",
+		"oxlint-rules/no-chained-type-assertions": "error",
+		"oxlint-rules/no-date-now-constructor": "error",
+		"oxlint-rules/no-export-star": "error",
+		"oxlint-rules/no-planning-terms-in-comments": "error",
+		"oxlint-rules/no-reduce-accumulator-copy": "error",
+		"oxlint-rules/no-reflect-apply": "error",
+		"oxlint-rules/no-shape-in-symbol-names": "error",
+		"oxlint-rules/no-unknown-type-aliases": "error",
+		"oxlint-rules/no-widen-then-assert": "error",
+		"oxlint-rules/prefer-object-hasown": "error",
+		"oxlint-rules/require-comment-for-empty-catch": "error",
+		"oxlint-rules/require-readable-spacing": "error",
+		"oxlint-rules/require-safety-comment-for-type-assertion": "error"
+	},
+	"overrides": [
+		{
+			// Command-line entry points print their results.
+			"files": ["try.ts", "eval.ts", "hook.ts"],
+			"rules": { "no-console": "off" }
+		}
+	],
+	"ignorePatterns": ["**/node_modules/**", "lint/oxlint-rules/**"]
+}
