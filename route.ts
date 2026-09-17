@@ -220,7 +220,10 @@ async function prefetch(
 ): Promise<{ message?: string; note: string } | null> {
 	const terms = termsIn(prompt)
 	if (!terms.length) return null
-	if (await hasNamedFile(pi, ctx, terms)) return { note: 'named file, model reads it' }
+	if (await hasNamedFile(pi, ctx, terms)) {
+		h.stats.prefetchSkipped++
+		return { note: 'named file in prompt, no pre-fetch' }
+	}
 	const list = await candidateFiles(pi, ctx, terms, h.sent)
 	if (!list.length) return null
 	const paths = list.map((file) => file.path)

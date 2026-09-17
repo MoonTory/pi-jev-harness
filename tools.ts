@@ -118,7 +118,8 @@ export async function onToolCall(
 export async function onToolResult(h: Harness, event: ToolResultEvent, ctx: ExtensionContext) {
 	try {
 		if (!active(h) || !h.config.trim || event.isError) return undefined
-		if (!['bash', 'grep', 'find', 'read', 'ls'].includes(event.toolName)) return undefined
+		// Clean file reads are what the model asked for; only long command, search and listing output gets judged.
+		if (!['bash', 'grep', 'find', 'ls'].includes(event.toolName)) return undefined
 		const full = resultText(event)
 		if (full.length < h.config.trimMinChars) return undefined
 		const state = {

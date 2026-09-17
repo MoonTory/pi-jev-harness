@@ -25,6 +25,7 @@ export type Stats = {
 	jevTokens: number
 	errors: number
 	turns: number
+	prefetchSkipped: number
 	toolsHidden: number
 	prefetched: number
 	trimmed: number

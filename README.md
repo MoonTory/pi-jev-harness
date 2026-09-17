@@ -21,7 +21,7 @@ Five things, each one Jev request, each switchable in config.
 
 **2. Pre-fetch context** (`before_agent_start`, when pre-fetch is enabled). Code pulls terms from a vague prompt and sends matching lines from up to forty files to Jev. If the prompt names a file and `rg --files` finds it, pre-fetch stops: the model can make a cheaper targeted read itself. Otherwise Jev ranks the candidates. At most two files qualify when Jev's `first` confidence or file score reaches 0.6. The harness injects 15-line windows around matching lines, merges overlapping windows, and caps the total at 120 lines per file. It never injects a file twice in one session. The injected message stays out of the transcript; the footer lists its file ranges.
 
-**3. Trim results** (`tool_result`, for bash, grep, find, read, ls over 1,500 chars). Jev sees the head and tail of the output with the task and answers: did it succeed, is it relevant, and how much should the model see (all, head, drop). Irrelevant output is replaced by a one-line note with the relevance score and how to get it back; repetitive output is cut to its first 2,000 chars. The model never pays for output it did not need.
+**3. Trim results** (`tool_result`, for bash, grep, find, ls output over 6,000 chars; file reads are never judged, the model asked for exactly that). Jev sees the head and tail of the output with the task and answers: did it succeed, is it relevant, and how much should the model see (all, head, drop). Irrelevant output is replaced by a one-line note with the relevance score and how to get it back; repetitive output is cut to its first 2,000 chars. The model never pays for output it did not need. The judgement waits on Jev before the model sees the result, so the floor is high on purpose: only long test logs, wide greps and big listings are worth the round trip.
 
 **4. Loop control** (`tool_call`). When the same call with the same input shows up three times in the last twelve, Jev sees the recent calls and answers whether the agent is stuck and whether a different approach would be better. If so the call is blocked with a reason the model can act on. Checked once per turn.
 
@@ -39,7 +39,7 @@ The footer shows the last Jev verdict. Every Jev call is logged with its answers
 /jev-harness on      # default: pre-fetch, trim, loop control, guard (route is opt-in)
 /jev-harness log     # ask Jev and log every answer, change nothing
 /jev-harness off
-/jev-harness         # stats: turns routed, tool schemas hidden, files pre-fetched, results trimmed
+/jev-harness         # stats: turns seen, files pre-fetched, turns skipped, results trimmed, Jev cost
                      # and model tokens saved, loops caught, guard verdicts, Jev calls, latency, tokens, cost
 ```
 
@@ -59,7 +59,7 @@ Optional `~/.pi/agent/jev-harness.json`:
 	"guard": true,
 	"prefetchFiles": 2,
 	"prefetchLines": 120,
-	"trimMinChars": 1500,
+	"trimMinChars": 6000,
 	"keepHeadChars": 2000,
 	"timeoutMs": 3000,
 	"showStatus": true

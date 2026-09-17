@@ -28,7 +28,7 @@ const DEFAULTS: Config = {
 	guard: true,
 	prefetchFiles: 2,
 	prefetchLines: 120,
-	trimMinChars: 1500,
+	trimMinChars: 6000,
 	keepHeadChars: 2000,
 	timeoutMs: 3000,
 	showStatus: true
@@ -70,7 +70,7 @@ function report(h: Harness, ctx: ExtensionContext): void {
 	const cost = ((s.jevTokens / 1e6) * PRICE_PER_MTOK).toFixed(4)
 	ctx.ui.notify(
 		[
-			`jev-harness ${h.config.mode} · ${s.turns} turns routed, ${s.toolsHidden} tool schemas hidden, ${s.prefetched} files pre-fetched`,
+			`jev-harness ${h.config.mode} · ${s.turns} turns seen, ${s.prefetched} files pre-fetched, ${s.prefetchSkipped} turns skipped (named file), ${s.toolsHidden} tool schemas hidden`,
 			`${s.trimmed} results trimmed (~${saved.toLocaleString()} model tokens saved), ${s.loopsCaught} loops caught, guard asked ${s.guardAsked} blocked ${s.guardBlocked}`,
 			`jev: ${s.jevCalls} successful calls, ${avg}ms avg, ${s.jevTokens.toLocaleString()} tokens ($${cost}), ${s.errors} errors · log ~/.jev-harness/log.jsonl`
 		].join('\n'),
@@ -86,6 +86,7 @@ function createHarness(): Harness {
 		jevTokens: 0,
 		errors: 0,
 		turns: 0,
+		prefetchSkipped: 0,
 		toolsHidden: 0,
 		prefetched: 0,
 		trimmed: 0,
