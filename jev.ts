@@ -112,7 +112,7 @@ export function routingQuestions(toolNames: string[]): Record<string, Question> 
 }
 
 // ---- 2. pre-fetch: which candidate files should be read before the model starts ----
-// Files named in the prompt are pinned by code and never asked about. Jev ranks the rest.
+// Named files are left for the model's targeted read. Jev ranks vague-prompt candidates.
 export function relevanceQuestions(paths: string[]): Record<string, Question> {
 	const questions: Record<string, Question> = {
 		first: choice(

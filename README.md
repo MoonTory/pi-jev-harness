@@ -17,9 +17,9 @@ No runtime dependencies. Node 22.18 or newer. `rg` (ripgrep) on the path for con
 
 Five things, each one Jev request, each switchable in config.
 
-**1. Route the turn** (`before_agent_start`). Jev reads the prompt and the active tool list and answers what kind of turn it is (answer, explore, change, run, unclear) and, per tool, whether that tool will be needed. Tools under the threshold are hidden for the turn with `setActiveTools`, and restored at `agent_end`. The model sees fewer schemas and a one-line note in the system prompt saying what was routed. A confident `unclear` adds "ask one clarifying question before using tools".
+**1. Route the turn** (`before_agent_start`, opt-in). Jev can read the prompt and the active tool list, then decide which tools to keep for the turn. It is off by default: tool schemas live in Pi's cached system prompt, so hiding them per turn saves little and can break that cache. When enabled, hidden tools are restored at `agent_end`, and the system prompt notes the route.
 
-**2. Pre-fetch context** (`before_agent_start`, when pre-fetch is enabled). Code pulls terms from the prompt (paths, file names, identifiers, quoted strings, plain words), runs `rg -n -F --max-count 1` for each, and sends its matching lines to Jev. Files named in the prompt are found by name and always pre-fetched. Jev gets the other candidates, up to forty paths with the terms they matched, and answers per file whether the model will need to read it. The top three at or above 0.6 are read (first 120 lines) and injected as one message before the model's first turn. The model starts with the right files open instead of spending two or three tool turns finding them.
+**2. Pre-fetch context** (`before_agent_start`, when pre-fetch is enabled). Code pulls terms from a vague prompt and sends matching lines from up to forty files to Jev. If the prompt names a file and `rg --files` finds it, pre-fetch stops: the model can make a cheaper targeted read itself. Otherwise Jev ranks the candidates. At most two files qualify when Jev's `first` confidence or file score reaches 0.6. The harness injects 15-line windows around matching lines, merges overlapping windows, and caps the total at 120 lines per file. It never injects a file twice in one session. The injected message stays out of the transcript; the footer lists its file ranges.
 
 **3. Trim results** (`tool_result`, for bash, grep, find, read, ls over 1,500 chars). Jev sees the head and tail of the output with the task and answers: did it succeed, is it relevant, and how much should the model see (all, head, drop). Irrelevant output is replaced by a one-line note with the relevance score and how to get it back; repetitive output is cut to its first 2,000 chars. The model never pays for output it did not need.
 
@@ -27,12 +27,16 @@ Five things, each one Jev request, each switchable in config.
 
 **5. Guard** (`tool_call`, non-read tools). A compact version of [pi-jev-guard](https://github.com/MoonTory/pi-jev-guard) in the same request as loop control: a risk Score (read only, reversible, hard to reverse, destructive) and a secrets Noul. Hard to reverse or destructive calls get a confirm dialog with Jev's reason; with no UI they are blocked so the model asks the user.
 
+### When it helps
+
+Pre-fetch pays off on vague prompts that would take several tool calls to locate. On prompts that name a file, the model's own read is cheaper, so the harness stays out of the way.
+
 The footer shows the last Jev verdict. Every Jev call is logged with its answers to `~/.jev-harness/log.jsonl`.
 
 ## Commands
 
 ```
-/jev-harness on      # default: route, pre-fetch, trim, loop control, guard
+/jev-harness on      # default: pre-fetch, trim, loop control, guard (route is opt-in)
 /jev-harness log     # ask Jev and log every answer, change nothing
 /jev-harness off
 /jev-harness         # stats: turns routed, tool schemas hidden, files pre-fetched, results trimmed
@@ -48,12 +52,12 @@ Optional `~/.pi/agent/jev-harness.json`:
 ```json
 {
 	"mode": "on",
-	"route": true,
+	"route": false,
 	"prefetch": true,
 	"trim": true,
 	"loop": true,
 	"guard": true,
-	"prefetchFiles": 3,
+	"prefetchFiles": 2,
 	"prefetchLines": 120,
 	"trimMinChars": 1500,
 	"keepHeadChars": 2000,
@@ -62,7 +66,7 @@ Optional `~/.pi/agent/jev-harness.json`:
 }
 ```
 
-Thresholds live in `jev.ts` next to the questions: tool kept at 0.35, file pre-fetched at 0.6, result dropped below 0.3 relevance, stuck at 0.7, secrets at 0.7.
+Set `route` to `true` only if you accept its cache tradeoff. Thresholds live in `jev.ts` next to the questions: tool kept at 0.35, file pre-fetched at 0.6, result dropped below 0.3 relevance, stuck at 0.7, secrets at 0.7.
 
 ## Files
 
@@ -77,8 +81,10 @@ Thresholds live in `jev.ts` next to the questions: tool kept at 0.35, file pre-f
 
 ```
 cd some-repo
-node ~/code/pi-jev-harness/try.ts "where is the tick loop and how does the veto work in bot.ts?"
+node ~/code/pi-jev-harness/try.ts "where is the tick loop and how does the veto work in bot.ts"
 ```
+
+It reports `named file in prompt → no pre-fetch` for a prompt that names a file. For vague prompts, it reports the ranked files and the matching line ranges it would inject.
 
 On the jev-snake repo:
 

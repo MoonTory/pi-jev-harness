@@ -21,12 +21,12 @@ import { active, type Config, type Harness, type Stats } from './types.ts'
 
 const DEFAULTS: Config = {
 	mode: 'on',
-	route: true,
+	route: false,
 	prefetch: true,
 	trim: true,
 	loop: true,
 	guard: true,
-	prefetchFiles: 3,
+	prefetchFiles: 2,
 	prefetchLines: 120,
 	trimMinChars: 1500,
 	keepHeadChars: 2000,
@@ -100,6 +100,7 @@ function createHarness(): Harness {
 		task: '',
 		allTools: null,
 		recent: [],
+		sent: new Set(),
 		loopChecked: false,
 		status: (ctx, text) => {
 			if (ctx.hasUI && config.showStatus) ctx.ui.setStatus('jev-harness', text)
@@ -131,6 +132,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on('session_start', (_event, ctx) => {
 		Object.assign(h.config, loadConfig())
+		h.sent.clear()
 		h.status(ctx, active(h) ? `jev-harness ${h.config.mode}` : undefined)
 	})
 

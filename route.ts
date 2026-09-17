@@ -57,6 +57,16 @@ const STOPWORDS = new Set([
 	'your'
 ])
 
+const CANDIDATE_LIMIT = 40
+
+const READ_BYTES = 64 * 1024
+
+const IGNORED_GLOBS = ['-g', '!node_modules', '-g', '!dist', '-g', '!.git']
+
+type Region = { start: number; end: number }
+
+type ReadRegions = { content: string; ranges: Region[]; hasMoreLines: boolean }
+
 /** Words in the prompt that could name code: paths, file names, identifiers, quoted strings, then plain words. */
 export function termsIn(prompt: string): string[] {
 	const out = new Set<string>()
@@ -76,37 +86,45 @@ export function termsIn(prompt: string): string[] {
 	for (const m of prompt.matchAll(/\b[a-z]{4,}\b/g)) {
 		if (!STOPWORDS.has(m[0])) out.add(m[0])
 	}
-	return [...out].filter((t) => t.length >= 3 && !/^https?:/.test(t)).slice(0, 8)
+	return [...out].filter((term) => term.length >= 3 && !/^https?:/.test(term)).slice(0, 8)
 }
 
-const CANDIDATE_LIMIT = 40
+/** `src/foo.ts` or `foo.ts`, not `v2.0` or `e.g.`: the extension must be letters. */
+function looksLikeFile(term: string): boolean {
+	return /^[\w./-]*\w\.[A-Za-z]{1,8}$/.test(term)
+}
 
-const NAMED_LIMIT = 8
+function fileArgs(term: string): string[] {
+	const base = term.split('/').pop() ?? term
+	return ['--files', '--max-filesize', '200K', '-g', `**/${base}`, ...IGNORED_GLOBS]
+}
 
-const READ_HEAD_BYTES = 64 * 1024
-
-const IGNORED_GLOBS = ['-g', '!node_modules', '-g', '!dist', '-g', '!.git']
+async function hasNamedFile(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	terms: string[]
+): Promise<boolean> {
+	const options = { cwd: ctx.cwd, timeout: 2000, ...(ctx.signal ? { signal: ctx.signal } : {}) }
+	for (const term of terms) {
+		if (!looksLikeFile(term)) continue
+		const result = await pi.exec('rg', fileArgs(term), options).catch(() => null)
+		const paths = (result?.stdout ?? '').split('\n').filter(Boolean)
+		// A path in the prompt must match as a path, not just by basename.
+		if (paths.some((path) => path === term || path.endsWith(`/${term}`))) return true
+	}
+	return false
+}
 
 async function candidateFiles(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	terms: string[]
+	terms: string[],
+	sent: Set<string>
 ): Promise<Candidate[]> {
-	const named = new Set<string>()
-	const files = new Map<string, { term: string; line: string }[]>()
+	const files = new Map<string, Candidate['matched']>()
 	const options = { cwd: ctx.cwd, timeout: 2000, ...(ctx.signal ? { signal: ctx.signal } : {}) }
 	for (const term of terms) {
-		if (!term.includes('.') && !term.includes('/')) continue
-		const base = term.split('/').pop() ?? term
-		const args = ['--files', '--max-filesize', '200K', '-g', `**/${base}`, ...IGNORED_GLOBS]
-		const res = await pi.exec('rg', args, options).catch(() => null)
-		const paths = (res?.stdout ?? '').split('\n').filter(Boolean)
-		// `src/foo.ts` in the prompt means that path, not every foo.ts in the tree.
-		const exact = paths.filter((path) => path === term || path.endsWith(`/${term}`))
-		for (const path of (exact.length ? exact : paths).slice(0, NAMED_LIMIT)) named.add(path)
-	}
-	for (const term of terms) {
-		if (named.size + files.size >= CANDIDATE_LIMIT) break
+		if (files.size >= CANDIDATE_LIMIT) break
 		const args = [
 			'-n',
 			'-F',
@@ -120,38 +138,70 @@ async function candidateFiles(
 			term,
 			'.'
 		]
-		const res = await pi.exec('rg', args, options).catch(() => null)
-		const hits = (res?.stdout ?? '').split('\n').filter(Boolean)
-		if (hits.length > 20) continue // a term that is everywhere says nothing
+		const result = await pi.exec('rg', args, options).catch(() => null)
+		const hits = (result?.stdout ?? '').split('\n').filter(Boolean)
+		if (hits.length > 20) continue
 		for (const hit of hits) {
-			if (named.size + files.size >= CANDIDATE_LIMIT) break
-			const m = /^(.+?):\d+:(.*)$/.exec(hit)
-			if (!m) continue
-			const [, path = '', text = ''] = m
-			if (named.has(path)) continue
-			files.set(path, [...(files.get(path) ?? []), { term, line: text.trim().slice(0, 120) }])
+			if (files.size >= CANDIDATE_LIMIT) break
+			const match = /^(.+?):(\d+):(.*)$/.exec(hit)
+			if (!match) continue
+			const [, path = '', at = '', text = ''] = match
+			if (sent.has(path)) continue
+			files.set(path, [
+				...(files.get(path) ?? []),
+				{ term, line: text.trim().slice(0, 120), at: Number(at) }
+			])
 		}
 	}
-	return [
-		...[...named].map((path) => ({ path, matched: [] })),
-		...[...files.entries()].map(([path, matched]) => ({ path, matched }))
-	]
+	return [...files.entries()].map(([path, matched]) => ({ path, matched }))
 }
 
-function readHead(cwd: string, path: string, maxLines: number): string | null {
+export function readRegions(
+	cwd: string,
+	path: string,
+	lineNumbers: number[],
+	maxLines: number
+): ReadRegions | null {
 	try {
 		const file = openSync(join(cwd, path), 'r')
 		try {
-			const buffer = Buffer.alloc(READ_HEAD_BYTES)
+			const buffer = Buffer.alloc(READ_BYTES)
 			const size = readSync(file, buffer, 0, buffer.length, 0)
-			const lines = buffer.toString('utf8', 0, size).split('\n')
-			const body = lines
-				.slice(0, maxLines)
-				.map((line, i) => `${String(i + 1).padStart(4)}  ${line}`)
-				.join('\n')
-			const capped = size === READ_HEAD_BYTES
-			const note = lines.length > maxLines || capped ? ` (first ${maxLines} lines)` : ''
-			return `--- ${path}${note}\n${body}`
+			const text = buffer.toString('utf8', 0, size)
+			// Drop a cut-off last line when the file is bigger than the buffer, and the empty line after a final newline.
+			const whole =
+				size === READ_BYTES ? text.slice(0, text.lastIndexOf('\n')) : text.replace(/\n$/, '')
+			const lines = whole.split('\n')
+			const windows = lineNumbers
+				.filter((line) => line > 0 && line <= lines.length)
+				.sort((a, b) => a - b)
+				.map((line) => ({ start: Math.max(1, line - 15), end: Math.min(lines.length, line + 15) }))
+			const merged = windows.reduce<Region[]>((regions, window) => {
+				const last = regions.at(-1)
+				if (last && window.start <= last.end + 1) last.end = Math.max(last.end, window.end)
+				else regions.push(window)
+				return regions
+			}, [])
+			const ranges: Region[] = []
+			let remaining = maxLines
+			for (const region of merged) {
+				if (remaining <= 0) break
+				const end = Math.min(region.end, region.start + remaining - 1)
+				ranges.push({ start: region.start, end })
+				remaining -= end - region.start + 1
+			}
+			if (!ranges.length) return null
+			const content = ranges
+				.map((region) => {
+					const body = lines
+						.slice(region.start - 1, region.end)
+						.map((line, index) => `${String(region.start + index).padStart(4)}  ${line}`)
+						.join('\n')
+					return `--- ${path}:${region.start}-${region.end}\n${body}`
+				})
+				.join('\n\n')
+			const selectedLines = ranges.reduce((total, range) => total + range.end - range.start + 1, 0)
+			return { content, ranges, hasMoreLines: size === READ_BYTES || selectedLines < lines.length }
 		} finally {
 			closeSync(file)
 		}
@@ -161,62 +211,59 @@ function readHead(cwd: string, path: string, maxLines: number): string | null {
 	}
 }
 
-/** Files the prompt names outright: always worth reading, no need to ask. */
-export function namedIn(prompt: string, list: Candidate[]): Candidate[] {
-	return list.filter((file) => {
-		const base = file.path.split('/').pop() ?? ''
-		return base.length > 3 && prompt.includes(base)
-	})
-}
-
-/** Step 2: pick the files worth reading before the model starts and return them as one message. */
+/** Step 2: pick vague-prompt files worth reading before the model starts. */
 async function prefetch(
 	h: Harness,
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	prompt: string
-): Promise<{ message: string; note: string } | null> {
+): Promise<{ message?: string; note: string } | null> {
 	const terms = termsIn(prompt)
 	if (!terms.length) return null
-	const list = await candidateFiles(pi, ctx, terms)
+	if (await hasNamedFile(pi, ctx, terms)) return { note: 'named file, model reads it' }
+	const list = await candidateFiles(pi, ctx, terms, h.sent)
 	if (!list.length) return null
-	const named = namedIn(prompt, list)
-	const rest = list.filter((file) => !named.includes(file))
-	const ranked: { path: string; p: number }[] = named.map((file) => ({ path: file.path, p: 1 }))
-	if (rest.length && ranked.length < h.config.prefetchFiles) {
-		const paths = rest.map((file) => file.path)
-		const result = await h.jev(
-			'prefetch',
-			{ task: prompt, files: rest },
-			relevanceQuestions(paths),
-			ctx
+	const paths = list.map((file) => file.path)
+	const result = await h.jev(
+		'prefetch',
+		{ task: prompt, files: list },
+		relevanceQuestions(paths),
+		ctx
+	)
+	if (!result) return null
+	const first = choiceOf(result.answers, 'first')
+	const picked = paths
+		.map((path, index) => {
+			const noul = noulOf(result.answers, `f${index}`)
+			const confidence = path === first.choice ? first.confidence : 0
+			return { path, score: Math.max(noul, confidence) }
+		})
+		.filter((file) => file.score >= THRESHOLDS.prefetchFile)
+		.sort((a, b) => b.score - a.score)
+		.slice(0, h.config.prefetchFiles)
+	const parts = picked.flatMap((file) => {
+		const candidate = list.find((item) => item.path === file.path)
+		const read = readRegions(
+			ctx.cwd,
+			file.path,
+			candidate?.matched.map((match) => match.at) ?? [],
+			h.config.prefetchLines
 		)
-		if (result) {
-			const first = choiceOf(result.answers, 'first')
-			for (const [i, path] of paths.entries()) {
-				const p = noulOf(result.answers, `f${i}`)
-				const boost = path === first.choice ? first.confidence : 0
-				if (Math.max(p, boost) >= THRESHOLDS.prefetchFile)
-					ranked.push({ path, p: Math.max(p, boost) })
-			}
-		}
-	}
-	const namedPaths = new Set(named.map((file) => file.path))
-	const picked = [
-		...ranked.filter((file) => namedPaths.has(file.path)),
-		...ranked
-			.filter((file) => !namedPaths.has(file.path))
-			.sort((a, b) => b.p - a.p)
-			.slice(0, Math.max(h.config.prefetchFiles - named.length, 0))
-	]
-	const parts = picked
-		.map((file) => readHead(ctx.cwd, file.path, h.config.prefetchLines))
-		.filter((part) => part !== null)
+		if (!read) return []
+		if (h.config.mode === 'on') h.sent.add(file.path)
+		return [{ path: file.path, read }]
+	})
 	if (!parts.length) return null
 	h.stats.prefetched += parts.length
-	const note = `prefetched ${picked.map((f) => `${f.path} ${f.p.toFixed(2)}`).join(', ')} of ${list.length} candidates`
-	const message = `Context pre-fetched by jev-harness for this request (matched terms: ${terms.join(', ')}). Read these files again only if you need lines beyond what is shown.\n\n${parts.join('\n\n')}`
-	return { message, note }
+	const regions = parts.flatMap(({ path, read }) =>
+		read.ranges.map((range) => `${path}:${range.start}-${range.end}`)
+	)
+	const moreLines = parts.filter((part) => part.read.hasMoreLines).map((part) => part.path)
+	const moreNote = moreLines.length
+		? ` More lines outside the excerpt: ${moreLines.join(', ')}.`
+		: ''
+	const message = `Context pre-fetched by jev-harness for this request. These excerpts show matching regions.${moreNote}\n\n${parts.map((part) => part.read.content).join('\n\n')}`
+	return { message, note: `pre-fetched ${regions.join(', ')}` }
 }
 
 /** Step 1: ask which kind of turn this is and which tools it needs; hide the rest for the turn. */
@@ -229,17 +276,17 @@ async function route(
 	const names = pi.getActiveTools()
 	const tools = pi
 		.getAllTools()
-		.filter((t) => names.includes(t.name))
-		.map((t) => ({ name: t.name, description: short(t.description, 200) }))
+		.filter((tool) => names.includes(tool.name))
+		.map((tool) => ({ name: tool.name, description: short(tool.description, 200) }))
 	const result = await h.jev('route', { prompt, cwd: ctx.cwd, tools }, routingQuestions(names), ctx)
 	if (!result) return null
 	const kind = choiceOf(result.answers, 'kind')
 	const keep = names.filter(
-		(n) =>
-			THRESHOLD_ALWAYS_KEEP.includes(n) ||
-			noulOf(result.answers, `use_${n}`) >= THRESHOLDS.toolNeeded
+		(name) =>
+			THRESHOLD_ALWAYS_KEEP.includes(name) ||
+			noulOf(result.answers, `use_${name}`) >= THRESHOLDS.toolNeeded
 	)
-	const hidden = names.filter((n) => !keep.includes(n))
+	const hidden = names.filter((name) => !keep.includes(name))
 	let note = `kind ${kind.choice} (${kind.confidence.toFixed(2)}), tools ${keep.join(',')}`
 	if (hidden.length) note += ` (hidden: ${hidden.join(',')})`
 	if (h.config.mode === 'on' && kind.choice !== 'answer' && hidden.length) {
@@ -264,26 +311,28 @@ export async function onBeforeAgentStart(
 	h.loopChecked = false
 	if (!active(h)) return undefined
 	h.stats.turns++
-	const notes: string[] = []
-	let message: string | undefined
-	if (h.config.route) {
-		const routed = await route(h, pi, ctx, event.prompt)
-		if (routed) notes.push(routed.note)
-	}
-	if (h.config.prefetch) {
-		const fetched = await prefetch(h, pi, ctx, event.prompt)
-		if (fetched) {
-			notes.push(fetched.note)
-			message = fetched.message
+	if (h.config.route || h.config.prefetch) h.status(ctx, 'jev: looking for context…')
+	const routePromise = h.config.route ? route(h, pi, ctx, event.prompt) : Promise.resolve(null)
+	const prefetchPromise = h.config.prefetch
+		? prefetch(h, pi, ctx, event.prompt)
+		: Promise.resolve(null)
+	const [routed, fetched] = await Promise.all([routePromise, prefetchPromise]).catch(
+		(err: unknown) => {
+			h.stats.errors++
+			h.log({ what: 'error', error: err instanceof Error ? err.message : String(err) })
+			return [null, null] as const
 		}
-	}
-	h.status(ctx, notes[0] ? `jev ${notes[0]}` : `jev-harness ${h.config.mode}`)
+	)
+	const notes = [routed?.note, fetched?.note].filter((note): note is string => !!note)
+	h.status(ctx, notes[0] ? `jev ${notes.join('; ')}` : `jev-harness ${h.config.mode}`)
 	if (h.config.mode !== 'on') return undefined
-	const systemPrompt = notes.length
-		? `${event.systemPrompt}\n\njev-harness routed this turn: ${notes.join('; ')}. Tools not listed are hidden for this turn; say so if you need one.`
+	const systemPrompt = routed
+		? `${event.systemPrompt}\n\njev-harness routed this turn: ${routed.note}. Tools not listed are hidden for this turn; say so if you need one.`
 		: undefined
 	return {
 		...(systemPrompt ? { systemPrompt } : {}),
-		...(message ? { message: { customType: 'jev-harness', content: message, display: true } } : {})
+		...(fetched?.message
+			? { message: { customType: 'jev-harness', content: fetched.message, display: false } }
+			: {})
 	}
 }

@@ -38,7 +38,7 @@ export type RecentCall = { tool: string; key: string; input: unknown }
 
 export type Block = { block: true; reason: string }
 
-export type Candidate = { path: string; matched: { term: string; line: string }[] }
+export type Candidate = { path: string; matched: { term: string; line: string; at: number }[] }
 
 export type Harness = {
 	config: Config
@@ -46,6 +46,7 @@ export type Harness = {
 	task: string
 	allTools: string[] | null
 	recent: RecentCall[]
+	sent: Set<string>
 	loopChecked: boolean
 	status: (ctx: ExtensionContext, text?: string) => void
 	log: (entry: Record<string, unknown>) => void
