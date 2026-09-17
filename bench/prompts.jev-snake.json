@@ -1,0 +1,74 @@
+[
+	{
+		"id": "named-tick-loop",
+		"prompt": "where is the tick loop in src/snake/server.ts?",
+		"kind": "named",
+		"expect": ["loop", "69"]
+	},
+	{
+		"id": "named-veto",
+		"prompt": "what does veto() in src/snake/bot.ts do when every direction is fatal?",
+		"kind": "named",
+		"expect": ["chosen"]
+	},
+	{
+		"id": "named-max-rules",
+		"prompt": "in src/snake/rules.ts, what is MAX_RULES and where is it enforced?",
+		"kind": "named",
+		"expect": ["4", "learn"]
+	},
+	{
+		"id": "vague-dead-snake",
+		"prompt": "where do we handle a dead snake?",
+		"kind": "vague",
+		"expect": ["alive", "endGame"]
+	},
+	{
+		"id": "vague-trap-risk",
+		"prompt": "how does the snake decide it is about to trap itself?",
+		"kind": "vague",
+		"expect": ["trap_risk", "reachableCells"]
+	},
+	{
+		"id": "vague-poison",
+		"prompt": "what happens when the snake eats poison?",
+		"kind": "vague",
+		"expect": ["-2", "length"]
+	},
+	{
+		"id": "vague-learned-rules",
+		"prompt": "how are learned rules injected into the prompt?",
+		"kind": "vague",
+		"expect": ["ruleTexts", "buildQuestions"]
+	},
+	{
+		"id": "vague-vetoed-direction",
+		"prompt": "why does the web UI sometimes show a struck-through direction?",
+		"kind": "vague",
+		"expect": ["vetoed"]
+	},
+	{
+		"id": "vague-cost",
+		"prompt": "how is the cost figure on the page calculated?",
+		"kind": "vague",
+		"expect": ["0.042"]
+	},
+	{
+		"id": "vague-spiders",
+		"prompt": "where do spiders move and what stops them?",
+		"kind": "vague",
+		"expect": ["frozenTicks"]
+	},
+	{
+		"id": "vague-rule-eval",
+		"prompt": "what makes the eval accept or reject a new rule?",
+		"kind": "vague",
+		"expect": ["0.5"]
+	},
+	{
+		"id": "run-typecheck",
+		"prompt": "run the type check and tell me if it passes",
+		"kind": "run",
+		"expect": ["pass"]
+	}
+]

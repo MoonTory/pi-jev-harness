@@ -57,7 +57,7 @@
 	"overrides": [
 		{
 			// Command-line entry points print their results.
-			"files": ["try.ts", "eval.ts", "hook.ts"],
+			"files": ["try.ts", "eval.ts", "hook.ts", "bench.ts"],
 			"rules": { "no-console": "off" }
 		}
 	],
