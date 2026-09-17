@@ -112,13 +112,19 @@ export function routingQuestions(toolNames: string[]): Record<string, Question> 
 }
 
 // ---- 2. pre-fetch: which candidate files should be read before the model starts ----
-export function relevanceQuestions(count: number): Record<string, Question> {
-	const questions: Record<string, Question> = {}
-	for (let i = 0; i < count; i++) {
-		questions[`f${i}`] = noul(
-			`Will the model need to read file ${i} in \`files\` to do \`task\`? Judge from the path, the terms it matched, and the matching lines. A file whose name appears in the task is almost always needed; a file that only matches common words usually is not.`
+// Files named in the prompt are pinned by code and never asked about. Jev ranks the rest.
+export function relevanceQuestions(paths: string[]): Record<string, Question> {
+	const questions: Record<string, Question> = {
+		first: choice(
+			'Which file in `files` should the model read first to do `task`? Judge from the path and the matching lines.',
+			Object.fromEntries(paths.map((path) => [path, null]))
 		)
 	}
+	paths.forEach((path, i) => {
+		questions[`f${i}`] = noul(
+			`Will the model need to read \`${path}\` to do \`task\`? Judge from the matching lines in \`files\`, not from how many terms matched. A file that only matches common words usually is not needed.`
+		)
+	})
 	return questions
 }
 

@@ -62,15 +62,18 @@ const list = [...files.entries()].slice(0, 40).map(([path, matched]) => ({ path,
 console.log(`terms: ${terms.join(', ') || '(none)'} → ${list.length} candidate files`)
 
 if (list.length) {
-	const rel = await ask({ task: prompt, files: list }, relevanceQuestions(list.length))
-	console.log(`relevance: ${rel.ms}ms ${rel.inputTokens} tok`)
+	const rel = await ask({ task: prompt, files: list }, relevanceQuestions(list.map((f) => f.path)))
+	const first = choiceOf(rel.answers, 'first')
+	console.log(
+		`relevance: ${rel.ms}ms ${rel.inputTokens} tok, first: ${first.choice} (${first.confidence.toFixed(2)})`
+	)
 	list
 		.map((file, i) => ({ ...file, p: noulOf(rel.answers, `f${i}`) }))
 		.sort((a, b) => b.p - a.p)
 		.slice(0, 8)
 		.forEach((file) =>
 			console.log(
-				`  ${file.p >= THRESHOLDS.prefetchFile ? 'read' : 'skip'} ${file.p.toFixed(2)} ${file.path}  (${file.matched.join(', ')})`
+				`  ${file.p >= THRESHOLDS.prefetchFile ? 'read' : 'skip'} ${file.p.toFixed(2)} ${file.path}  (${file.matched.map((m) => m.term).join(', ')})`
 			)
 		)
 }

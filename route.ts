@@ -129,6 +129,14 @@ function readHead(cwd: string, path: string, maxLines: number): string | null {
 	}
 }
 
+/** Files the prompt names outright: always worth reading, no need to ask. */
+export function namedIn(prompt: string, list: Candidate[]): Candidate[] {
+	return list.filter((file) => {
+		const base = file.path.split('/').pop() ?? ''
+		return base.length > 3 && prompt.includes(base)
+	})
+}
+
 /** Step 2: pick the files worth reading before the model starts and return them as one message. */
 async function prefetch(
 	h: Harness,
@@ -140,21 +148,31 @@ async function prefetch(
 	if (!terms.length) return null
 	const list = await candidateFiles(pi, ctx, terms)
 	if (!list.length) return null
-	const result = await h.jev(
-		'prefetch',
-		{ task: prompt, files: list },
-		relevanceQuestions(list.length),
-		ctx
-	)
-	if (!result) return null
-	const picked = list
-		.map((file, i) => ({ ...file, p: noulOf(result.answers, `f${i}`) }))
-		.filter((file) => file.p >= THRESHOLDS.prefetchFile)
-		.sort((a, b) => b.p - a.p)
-		.slice(0, h.config.prefetchFiles)
+	const named = namedIn(prompt, list)
+	const rest = list.filter((file) => !named.includes(file))
+	const ranked: { path: string; p: number }[] = named.map((file) => ({ path: file.path, p: 1 }))
+	if (rest.length && ranked.length < h.config.prefetchFiles) {
+		const paths = rest.map((file) => file.path)
+		const result = await h.jev(
+			'prefetch',
+			{ task: prompt, files: rest },
+			relevanceQuestions(paths),
+			ctx
+		)
+		if (result) {
+			const first = choiceOf(result.answers, 'first')
+			for (const [i, path] of paths.entries()) {
+				const p = noulOf(result.answers, `f${i}`)
+				const boost = path === first.choice ? first.confidence : 0
+				if (Math.max(p, boost) >= THRESHOLDS.prefetchFile)
+					ranked.push({ path, p: Math.max(p, boost) })
+			}
+		}
+	}
+	const picked = ranked.sort((a, b) => b.p - a.p).slice(0, h.config.prefetchFiles)
 	const parts = picked
 		.map((file) => readHead(ctx.cwd, file.path, h.config.prefetchLines))
-		.filter((p) => p !== null)
+		.filter((part) => part !== null)
 	if (!parts.length) return null
 	h.stats.prefetched += parts.length
 	const note = `prefetched ${picked.map((f) => `${f.path} ${f.p.toFixed(2)}`).join(', ')} of ${list.length} candidates`
