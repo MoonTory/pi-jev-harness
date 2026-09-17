@@ -72,7 +72,7 @@ function report(h: Harness, ctx: ExtensionContext): void {
 		[
 			`jev-harness ${h.config.mode} · ${s.turns} turns routed, ${s.toolsHidden} tool schemas hidden, ${s.prefetched} files pre-fetched`,
 			`${s.trimmed} results trimmed (~${saved.toLocaleString()} model tokens saved), ${s.loopsCaught} loops caught, guard asked ${s.guardAsked} blocked ${s.guardBlocked}`,
-			`jev: ${s.jevCalls} calls, ${avg}ms avg, ${s.jevTokens.toLocaleString()} tokens ($${cost}), ${s.errors} errors · log ~/.jev-harness/log.jsonl`
+			`jev: ${s.jevCalls} successful calls, ${avg}ms avg, ${s.jevTokens.toLocaleString()} tokens ($${cost}), ${s.errors} errors · log ~/.jev-harness/log.jsonl`
 		].join('\n'),
 		'info'
 	)
@@ -104,6 +104,7 @@ function createHarness(): Harness {
 		status: (ctx, text) => {
 			if (ctx.hasUI && config.showStatus) ctx.ui.setStatus('jev-harness', text)
 		},
+		log,
 		jev: async (what, state, questions, ctx) => {
 			try {
 				const result = await ask(state, questions, {

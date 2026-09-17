@@ -48,6 +48,7 @@ export type Harness = {
 	recent: RecentCall[]
 	loopChecked: boolean
 	status: (ctx: ExtensionContext, text?: string) => void
+	log: (entry: Record<string, unknown>) => void
 	jev: (
 		what: string,
 		state: unknown,

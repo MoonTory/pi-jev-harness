@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { closeSync, openSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
 	BeforeAgentStartEvent,
@@ -79,50 +79,82 @@ export function termsIn(prompt: string): string[] {
 	return [...out].filter((t) => t.length >= 3 && !/^https?:/.test(t)).slice(0, 8)
 }
 
+const CANDIDATE_LIMIT = 40
+
+const NAMED_LIMIT = 8
+
+const READ_HEAD_BYTES = 64 * 1024
+
+const IGNORED_GLOBS = ['-g', '!node_modules', '-g', '!dist', '-g', '!.git']
+
 async function candidateFiles(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	terms: string[]
 ): Promise<Candidate[]> {
+	const named = new Set<string>()
 	const files = new Map<string, { term: string; line: string }[]>()
+	const options = { cwd: ctx.cwd, timeout: 2000, ...(ctx.signal ? { signal: ctx.signal } : {}) }
 	for (const term of terms) {
+		if (!term.includes('.') && !term.includes('/')) continue
+		const base = term.split('/').pop() ?? term
+		const args = ['--files', '--max-filesize', '200K', '-g', `**/${base}`, ...IGNORED_GLOBS]
+		const res = await pi.exec('rg', args, options).catch(() => null)
+		const paths = (res?.stdout ?? '').split('\n').filter(Boolean)
+		// `src/foo.ts` in the prompt means that path, not every foo.ts in the tree.
+		const exact = paths.filter((path) => path === term || path.endsWith(`/${term}`))
+		for (const path of (exact.length ? exact : paths).slice(0, NAMED_LIMIT)) named.add(path)
+	}
+	for (const term of terms) {
+		if (named.size + files.size >= CANDIDATE_LIMIT) break
 		const args = [
 			'-n',
 			'-F',
+			'--max-filesize',
+			'200K',
 			'--max-count',
 			'1',
-			'-g',
-			'!node_modules',
-			'-g',
-			'!dist',
-			'-g',
-			'!.git',
+			'--max-columns',
+			'200',
+			...IGNORED_GLOBS,
 			term,
 			'.'
 		]
-		const options = { cwd: ctx.cwd, timeout: 4000, ...(ctx.signal ? { signal: ctx.signal } : {}) }
 		const res = await pi.exec('rg', args, options).catch(() => null)
 		const hits = (res?.stdout ?? '').split('\n').filter(Boolean)
 		if (hits.length > 20) continue // a term that is everywhere says nothing
 		for (const hit of hits) {
+			if (named.size + files.size >= CANDIDATE_LIMIT) break
 			const m = /^(.+?):\d+:(.*)$/.exec(hit)
 			if (!m) continue
 			const [, path = '', text = ''] = m
+			if (named.has(path)) continue
 			files.set(path, [...(files.get(path) ?? []), { term, line: text.trim().slice(0, 120) }])
 		}
 	}
-	return [...files.entries()].slice(0, 40).map(([path, matched]) => ({ path, matched }))
+	return [
+		...[...named].map((path) => ({ path, matched: [] })),
+		...[...files.entries()].map(([path, matched]) => ({ path, matched }))
+	]
 }
 
 function readHead(cwd: string, path: string, maxLines: number): string | null {
 	try {
-		const lines = readFileSync(join(cwd, path), 'utf8').split('\n')
-		const body = lines
-			.slice(0, maxLines)
-			.map((line, i) => `${String(i + 1).padStart(4)}  ${line}`)
-			.join('\n')
-		const note = lines.length > maxLines ? ` (first ${maxLines} of ${lines.length} lines)` : ''
-		return `--- ${path}${note}\n${body}`
+		const file = openSync(join(cwd, path), 'r')
+		try {
+			const buffer = Buffer.alloc(READ_HEAD_BYTES)
+			const size = readSync(file, buffer, 0, buffer.length, 0)
+			const lines = buffer.toString('utf8', 0, size).split('\n')
+			const body = lines
+				.slice(0, maxLines)
+				.map((line, i) => `${String(i + 1).padStart(4)}  ${line}`)
+				.join('\n')
+			const capped = size === READ_HEAD_BYTES
+			const note = lines.length > maxLines || capped ? ` (first ${maxLines} lines)` : ''
+			return `--- ${path}${note}\n${body}`
+		} finally {
+			closeSync(file)
+		}
 	} catch {
 		// Deleted or unreadable since rg listed it.
 		return null
@@ -169,7 +201,14 @@ async function prefetch(
 			}
 		}
 	}
-	const picked = ranked.sort((a, b) => b.p - a.p).slice(0, h.config.prefetchFiles)
+	const namedPaths = new Set(named.map((file) => file.path))
+	const picked = [
+		...ranked.filter((file) => namedPaths.has(file.path)),
+		...ranked
+			.filter((file) => !namedPaths.has(file.path))
+			.sort((a, b) => b.p - a.p)
+			.slice(0, Math.max(h.config.prefetchFiles - named.length, 0))
+	]
 	const parts = picked
 		.map((file) => readHead(ctx.cwd, file.path, h.config.prefetchLines))
 		.filter((part) => part !== null)
@@ -230,13 +269,12 @@ export async function onBeforeAgentStart(
 	if (h.config.route) {
 		const routed = await route(h, pi, ctx, event.prompt)
 		if (routed) notes.push(routed.note)
-		const wantsContext = routed?.kind === 'explore' || routed?.kind === 'change'
-		if (h.config.prefetch && wantsContext) {
-			const fetched = await prefetch(h, pi, ctx, event.prompt)
-			if (fetched) {
-				notes.push(fetched.note)
-				message = fetched.message
-			}
+	}
+	if (h.config.prefetch) {
+		const fetched = await prefetch(h, pi, ctx, event.prompt)
+		if (fetched) {
+			notes.push(fetched.note)
+			message = fetched.message
 		}
 	}
 	h.status(ctx, notes[0] ? `jev ${notes[0]}` : `jev-harness ${h.config.mode}`)
