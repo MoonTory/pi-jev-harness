@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
+import { gradeRuns, table } from './bench/lib.ts'
+
 type Arm = 'harness' | 'plain'
 
 type Kind = 'named' | 'vague' | 'run'
@@ -30,9 +32,10 @@ type Run = {
 	jevMs: number
 	pass: boolean
 	finalAnswer: string
+	factScores: number[]
 }
 
-type Options = {
+type RunOptions = {
 	repo: string
 	prompts: string
 	runs: number
@@ -42,6 +45,12 @@ type Options = {
 	out: string
 	only?: Set<string>
 }
+
+type RegradeOptions = { regrade: string }
+
+type Options = RunOptions | RegradeOptions
+
+type StoredRun = Omit<Run, 'factScores'> & { factScores?: number[] }
 
 type JsonRecord = Record<string, unknown>
 
@@ -79,16 +88,19 @@ function numberOption(value: string | boolean | undefined, flag: string, fallbac
 function parseOptions(): Options {
 	const { values } = parseArgs({
 		options: {
-			repo: { type: 'string', required: true },
-			prompts: { type: 'string', required: true },
+			repo: { type: 'string' },
+			prompts: { type: 'string' },
 			runs: { type: 'string', default: '3' },
 			model: { type: 'string' },
 			arm: { type: 'string', default: 'both' },
 			parallel: { type: 'string', default: '2' },
 			out: { type: 'string', default: 'bench/results' },
-			only: { type: 'string' }
+			only: { type: 'string' },
+			regrade: { type: 'string' }
 		}
 	})
+	if (values.regrade !== undefined)
+		return { regrade: resolve(stringOption(values.regrade, '--regrade')) }
 	const arm = stringOption(values.arm, '--arm')
 	if (arm !== 'both' && arm !== 'harness' && arm !== 'plain')
 		throw new Error('--arm must be both, harness, or plain')
@@ -114,6 +126,48 @@ function readPrompts(path: string, only?: Set<string>): Prompt[] {
 	if (!prompts.length) throw new Error('no prompts selected')
 	if (only && prompts.length !== only.size) throw new Error('--only includes an unknown prompt id')
 	return prompts
+}
+
+function isStoredRun(value: unknown): value is StoredRun {
+	return (
+		isRecord(value) &&
+		typeof value.id === 'string' &&
+		typeof value.finalAnswer === 'string' &&
+		(value.arm === 'harness' || value.arm === 'plain') &&
+		(value.kind === 'named' || value.kind === 'vague' || value.kind === 'run') &&
+		typeof value.pass === 'boolean' &&
+		(value.factScores === undefined ||
+			(Array.isArray(value.factScores) &&
+				value.factScores.every((score) => typeof score === 'number')))
+	)
+}
+
+function readRegrade(path: string): {
+	record: JsonRecord
+	prompts: Prompt[]
+	runs: Run[]
+	arms: Arm[]
+} {
+	const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+	if (!isRecord(parsed) || !Array.isArray(parsed.runs))
+		throw new Error(`${path} must contain benchmark runs`)
+	const storedRuns = parsed.runs.filter(isStoredRun)
+	if (storedRuns.length !== parsed.runs.length)
+		throw new Error(`${path} must contain benchmark runs`)
+	const ids = new Set(storedRuns.map((run) => run.id))
+	const prompts = readPrompts(resolve(ROOT, 'bench/prompts.jev-snake.json')).filter((prompt) =>
+		ids.has(prompt.id)
+	)
+	if (prompts.length !== ids.size) throw new Error(`${path} includes runs with unknown prompt ids`)
+	const arms: Arm[] = ['harness', 'plain'].filter((arm): arm is Arm =>
+		storedRuns.some((run) => run.arm === arm)
+	)
+	return {
+		record: parsed,
+		prompts,
+		runs: storedRuns.map((run) => ({ ...run, factScores: run.factScores ?? [] })),
+		arms
+	}
 }
 
 function numberAt(record: JsonRecord, key: string): number {
@@ -214,7 +268,7 @@ function jevCost(started: number, ended: number): { calls: number; tokens: numbe
 	return { calls, tokens, ms }
 }
 
-async function runArm(options: Options, prompt: Prompt, arm: Arm, run: number): Promise<Run> {
+async function runArm(options: RunOptions, prompt: Prompt, arm: Arm, run: number): Promise<Run> {
 	const args = [
 		'--mode',
 		'json',
@@ -248,14 +302,13 @@ async function runArm(options: Options, prompt: Prompt, arm: Arm, run: number): 
 		jevCalls: jev.calls,
 		jevTokens: jev.tokens,
 		jevMs: jev.ms,
-		pass:
-			result.code === 0 &&
-			prompt.expect.every((expected) => answer.toLowerCase().includes(expected.toLowerCase())),
-		finalAnswer: answer
+		pass: false,
+		finalAnswer: answer,
+		factScores: []
 	}
 }
 
-async function runJobs(options: Options, prompts: Prompt[]): Promise<Run[]> {
+async function runJobs(options: RunOptions, prompts: Prompt[]): Promise<Run[]> {
 	const jobs = prompts.flatMap((prompt) =>
 		Array.from({ length: options.runs }, (_, run) => ({ prompt, run: run + 1 }))
 	)
@@ -275,63 +328,12 @@ async function runJobs(options: Options, prompts: Prompt[]): Promise<Run[]> {
 	return results
 }
 
-function median(values: number[]): number {
-	const sorted = [...values].sort((first, second) => first - second)
-	const middle = Math.floor(sorted.length / 2)
-	const current = sorted[middle] ?? 0
-	return sorted.length % 2 ? current : ((sorted[middle - 1] ?? 0) + current) / 2
-}
-
-function stats(runs: Run[]): {
-	wall: number
-	input: number
-	cacheRead: number
-	tools: number
-	pass: number
-} {
-	return {
-		wall: median(runs.map((run) => run.wallMs)),
-		input: median(runs.map((run) => run.inputTokens + run.cacheRead)),
-		cacheRead: median(runs.map((run) => run.cacheRead)),
-		tools: median(runs.map((run) => run.toolCalls)),
-		pass: runs.length ? runs.filter((run) => run.pass).length / runs.length : 0
-	}
-}
-
-function formatArm(runs: Run[]): string[] {
-	const values = stats(runs)
-	return [
-		`${(values.wall / 1000).toFixed(1)}s`,
-		Math.round(values.input).toLocaleString(),
-		Math.round(values.cacheRead).toLocaleString(),
-		values.tools.toFixed(1),
-		`${Math.round(values.pass * 100)}%`
-	]
-}
-
-function table(title: string, prompts: Prompt[], runs: Run[], arms: Arm[]): string {
-	const ids = new Set(prompts.map((prompt) => prompt.id))
-	const scoped = runs.filter((run) => ids.has(run.id))
-	const labels = arms.flatMap((arm) => [
-		`${arm} wall`,
-		`${arm} input+cache`,
-		`${arm} cache read`,
-		`${arm} tools`,
-		`${arm} pass`
-	])
-	const header = `| Prompt | ${labels.join(' | ')} |`
-	const divider = `| --- | ${labels.map(() => '---:').join(' | ')} |`
-	const rows = prompts.map((prompt) => {
-		const cells = arms.flatMap((arm) =>
-			formatArm(runs.filter((run) => run.id === prompt.id && run.arm === arm))
-		)
-		return `| ${prompt.id} | ${cells.join(' | ')} |`
-	})
-	const totals = arms.flatMap((arm) => formatArm(scoped.filter((run) => run.arm === arm)))
-	return `\n### ${title}\n\n${header}\n${divider}\n${rows.join('\n')}\n| **Total** | ${totals.join(' | ')} |`
-}
-
-function printReport(prompts: Prompt[], runs: Run[], arms: Arm[]): void {
+function printReport(
+	prompts: Prompt[],
+	runs: Run[],
+	arms: Arm[],
+	grader: { tokens: number; ms: number }
+): void {
 	console.log(table('All prompts', prompts, runs, arms))
 	const kinds: Kind[] = ['named', 'vague', 'run']
 	for (const kind of kinds) {
@@ -340,15 +342,29 @@ function printReport(prompts: Prompt[], runs: Run[], arms: Arm[]): void {
 	}
 	const jevTokens = runs.reduce((sum, run) => sum + run.jevTokens, 0)
 	console.log(
-		`\nTotal Jev tokens: ${jevTokens.toLocaleString()} ($${((jevTokens / 1_000_000) * 0.042).toFixed(6)} at $0.042/M)`
+		`\nRun Jev tokens: ${jevTokens.toLocaleString()} ($${((jevTokens / 1_000_000) * 0.042).toFixed(6)} at $0.042/M)`
+	)
+	console.log(
+		`Grader Jev tokens: ${grader.tokens.toLocaleString()} ($${((grader.tokens / 1_000_000) * 0.042).toFixed(6)} at $0.042/M)`
 	)
 }
 
 async function main(): Promise<void> {
 	const options = parseOptions()
+	if ('regrade' in options) {
+		const results = readRegrade(options.regrade)
+		const grader = await gradeRuns(results.prompts, results.runs)
+		results.record.prompts = results.prompts
+		results.record.runs = results.runs
+		writeFileSync(options.regrade, `${JSON.stringify(results.record, null, '\t')}\n`)
+		console.log(`Regraded: ${options.regrade}`)
+		printReport(results.prompts, results.runs, results.arms, grader)
+		return
+	}
 	if (!existsSync(options.repo)) throw new Error(`repo not found: ${options.repo}`)
 	const prompts = readPrompts(options.prompts, options.only)
 	const runs = await runJobs(options, prompts)
+	const grader = await gradeRuns(prompts, runs)
 	mkdirSync(options.out, { recursive: true })
 	const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
 	const output = resolve(options.out, `${timestamp}.json`)
@@ -356,8 +372,8 @@ async function main(): Promise<void> {
 		output,
 		`${JSON.stringify({ options: { ...options, only: options.only ? [...options.only] : undefined }, prompts, runs }, null, '\t')}\n`
 	)
-	printReport(prompts, runs, options.arms)
 	console.log(`Raw runs: ${output}`)
+	printReport(prompts, runs, options.arms, grader)
 }
 
 void main().catch((error: unknown) => {

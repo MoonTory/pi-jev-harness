@@ -101,13 +101,13 @@ kind: explore (1.00)  744ms 884 tok
 
 ## Benchmark
 
-Compare plain Pi with the harness on a fixed prompt set. Pi JSON mode writes per-turn usage and tool events to stdout; the benchmark sums final assistant-message usage and tool starts. It counts harness Jev calls from `~/.jev-harness/log.jsonl` whose timestamps fall within each harness run.
+Compare plain Pi with the harness on a fixed prompt set. Pi JSON mode writes per-turn usage and tool events to stdout; the benchmark sums final assistant-message usage and tool starts. It counts harness Jev calls from `~/.jev-harness/log.jsonl` whose timestamps fall within each harness run. After all runs finish, Jev grades each answer against its plain-English facts, so pass rates do not depend on exact code names or wording. Grader tokens print separately and do not count as run cost.
 
 ```
 npm run bench -- --repo ~/code/jev-snake --prompts bench/prompts.jev-snake.json --runs 3 --model gpt-5.6-sol
 ```
 
-Use `--arm both|harness|plain`, `--parallel 2`, `--out bench/results`, or `--only named-tick-loop,named-veto` to narrow a run. Each result JSON records raw answers, correctness checks, model and Jev token use, tool calls, and wall time. The report prints per-prompt and per-kind medians.
+Use `--arm both|harness|plain`, `--parallel 2`, `--out bench/results`, or `--only named-tick-loop,named-veto` to narrow a run. Use `node bench.ts --regrade bench/results/example.json` to grade saved answers without running Pi. Each result JSON records raw answers, per-fact Jev scores, model and run Jev token use, tool calls, and wall time. The report prints per-prompt and per-kind medians; pass rate means every fact scored at least 0.6.
 
 ## Development
 

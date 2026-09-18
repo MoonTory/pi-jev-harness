@@ -3,72 +3,94 @@
 		"id": "named-tick-loop",
 		"prompt": "where is the tick loop in src/snake/server.ts?",
 		"kind": "named",
-		"expect": ["loop", "69"]
+		"expect": ["The tick loop is the loop function in src/snake/server.ts"]
 	},
 	{
 		"id": "named-veto",
 		"prompt": "what does veto() in src/snake/bot.ts do when every direction is fatal?",
 		"kind": "named",
-		"expect": ["chosen"]
+		"expect": [
+			"When every direction is fatal, veto returns the direction the model originally chose"
+		]
 	},
 	{
 		"id": "named-max-rules",
 		"prompt": "in src/snake/rules.ts, what is MAX_RULES and where is it enforced?",
 		"kind": "named",
-		"expect": ["4", "learn"]
+		"expect": [
+			"MAX_RULES is 4",
+			"The cap is enforced in the learn loop when a new rule is accepted"
+		]
 	},
 	{
 		"id": "vague-dead-snake",
 		"prompt": "where do we handle a dead snake?",
 		"kind": "vague",
-		"expect": ["alive", "endGame"]
+		"expect": [
+			"Death is detected in game.ts where alive is set to false and the death reason is recorded",
+			"server.ts records the finished game's stats and starts a new one after a short delay"
+		]
 	},
 	{
 		"id": "vague-trap-risk",
 		"prompt": "how does the snake decide it is about to trap itself?",
 		"kind": "vague",
-		"expect": ["trap_risk", "reachableCells"]
+		"expect": [
+			"Jev answers a trap risk question as part of each move decision in bot.ts",
+			"The reachable cells per direction come from a flood fill in game.ts"
+		]
 	},
 	{
 		"id": "vague-poison",
 		"prompt": "what happens when the snake eats poison?",
 		"kind": "vague",
-		"expect": ["-2", "length"]
+		"expect": ["The score drops by 2 but not below 0", "The snake grows by 2 segments"]
 	},
 	{
 		"id": "vague-learned-rules",
 		"prompt": "how are learned rules injected into the prompt?",
 		"kind": "vague",
-		"expect": ["ruleTexts", "buildQuestions"]
+		"expect": [
+			"The server loads accepted rules at startup and turns them into sentences",
+			"The rules are appended to the move question text in bot.ts"
+		]
 	},
 	{
 		"id": "vague-vetoed-direction",
 		"prompt": "why does the web UI sometimes show a struck-through direction?",
 		"kind": "vague",
-		"expect": ["vetoed"]
+		"expect": [
+			"The model picked a fatal or reverse move and the code vetoed it, sending a safe direction instead",
+			"The struck label is the model's original choice"
+		]
 	},
 	{
 		"id": "vague-cost",
 		"prompt": "how is the cost figure on the page calculated?",
 		"kind": "vague",
-		"expect": ["0.042"]
+		"expect": ["Cost is input tokens divided by one million times 0.042 dollars"]
 	},
 	{
 		"id": "vague-spiders",
 		"prompt": "where do spiders move and what stops them?",
 		"kind": "vague",
-		"expect": ["frozenTicks"]
+		"expect": [
+			"Spiders move one random cell at a time with a chance to stay still each tick",
+			"The freeze item sets a frozen tick counter during which spiders do not move"
+		]
 	},
 	{
 		"id": "vague-rule-eval",
 		"prompt": "what makes the eval accept or reject a new rule?",
 		"kind": "vague",
-		"expect": ["0.5"]
+		"expect": [
+			"A rule is kept only if the average score improves by at least 0.5 over the baseline"
+		]
 	},
 	{
 		"id": "run-typecheck",
 		"prompt": "run the type check and tell me if it passes",
 		"kind": "run",
-		"expect": ["pass"]
+		"expect": ["The type check passed"]
 	}
 ]
